@@ -34,6 +34,10 @@ class RayArguments:
         default="PACK",
         metadata={"help": "The placement strategy for Ray training. Default is PACK."},
     )
+    ray_use_s3: bool = field(
+        default=False,
+        metadata={"help": "Whether to use S3 for Ray training. Default is False."},
+    )
 
     def __post_init__(self):
         self.use_ray = use_ray()

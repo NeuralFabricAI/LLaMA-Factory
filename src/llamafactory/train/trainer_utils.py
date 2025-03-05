@@ -642,6 +642,7 @@ def get_ray_trainer(
         run_config=RunConfig(
             name=ray_args.ray_run_name,
             storage_path=Path(ray_args.ray_storage_path).absolute().as_posix(),
+            storage_filesystem="s3" if ray_args.ray_use_s3 else "local"
         ),
     )
     return trainer
