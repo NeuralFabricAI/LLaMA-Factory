@@ -38,8 +38,6 @@ from ..extras.packages import is_apollo_available, is_galore_available, is_ray_a
 from ..hparams import FinetuningArguments, ModelArguments
 from ..model import find_all_linear_modules, load_model, load_tokenizer, load_valuehead_params
 
-import pyarrow.fs as fs
-
 
 if is_galore_available():
     from galore_torch import GaLoreAdafactor, GaLoreAdamW, GaLoreAdamW8bit  # type: ignore
@@ -643,8 +641,7 @@ def get_ray_trainer(
         ),
         run_config=RunConfig(
             name=ray_args.ray_run_name,
-            storage_path=Path(ray_args.ray_storage_path).absolute().as_posix(),
-            storage_filesystem=fs.S3FileSystem if ray_args.ray_use_s3 else "local"
+            storage_path=ray_args.ray_storage_path,
         ),
     )
     return trainer
