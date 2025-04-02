@@ -270,10 +270,9 @@ class LogCallback(TrainerCallback):
     @override
     def on_log(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
         logger.info_rank0("on_log function - Logging training status")
-        logger.info_rank0("args: ", json.dumps(args))
-        logger.info_rank0("state: ", json.dumps(state))
-        logger.info_rank0("control: ", json.dumps(control))
-        logger.info_rank0("kwargs: ", json.dumps(kwargs))
+
+        logger.info_rank0("args.should_save")
+        logger.info_rank0(args.should_save)
 
         if not args.should_save:
             return
@@ -297,7 +296,7 @@ class LogCallback(TrainerCallback):
             logs["throughput"] = round(state.num_input_tokens_seen / (time.time() - self.start_time), 2)
             logs["total_tokens"] = state.num_input_tokens_seen
 
-        if is_env_enabled("RECORD_VRAM"):
+        if True:
             vram_allocated, vram_reserved = get_peak_memory()
             logs["vram_allocated"] = round(vram_allocated / (1024**3), 2)
             logs["vram_reserved"] = round(vram_reserved / (1024**3), 2)
@@ -311,6 +310,8 @@ class LogCallback(TrainerCallback):
 
             logger.info_rank0("{" + log_str + "}")
 
+        logger.info_rank0("self.thread_pool")
+        logger.info_rank0(self.thread_pool)
         if self.thread_pool is not None:
             self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
