@@ -269,6 +269,12 @@ class LogCallback(TrainerCallback):
 
     @override
     def on_log(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        logger.info_rank0("on_log function - Logging training status")
+        logger.info_rank0("args: ", args)
+        logger.info_rank0("state: ", state)
+        logger.info_rank0("control: ", control)
+        logger.info_rank0("kwargs: ", kwargs)
+
         if not args.should_save:
             return
 
