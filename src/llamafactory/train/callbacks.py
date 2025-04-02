@@ -212,6 +212,13 @@ class LogCallback(TrainerCallback):
         self.remaining_time = str(timedelta(seconds=int(remaining_time)))
 
     def _write_log(self, output_dir: str, logs: dict[str, Any]) -> None:
+        logger.info_rank0("Writing logs to file")
+        logger.info_rank0(logs)
+        # writing to this file
+        logger.info_rank0("output_dir")
+        logger.info_rank0(output_dir)
+        logger.info_rank0(os.path.join(output_dir, TRAINER_LOG))
+
         with open(os.path.join(output_dir, TRAINER_LOG), "a", encoding="utf-8") as f:
             f.write(json.dumps(logs) + "\n")
 
