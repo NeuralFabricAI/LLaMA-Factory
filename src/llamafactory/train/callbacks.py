@@ -49,6 +49,7 @@ if TYPE_CHECKING:
 
     from ..hparams import DataArguments, FinetuningArguments, GeneratingArguments, ModelArguments
 
+from smart_open import open
 
 logger = logging.get_logger(__name__)
 
