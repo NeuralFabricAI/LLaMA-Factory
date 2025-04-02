@@ -220,7 +220,7 @@ class LogCallback(TrainerCallback):
         logger.info_rank0(output_dir)
         logger.info_rank0(os.path.join(output_dir, TRAINER_LOG))
 
-        with open(os.path.join(output_dir, TRAINER_LOG), "a", encoding="utf-8") as f:
+        with open(os.path.join(output_dir, TRAINER_LOG), "wb", encoding="utf-8") as f:
             f.write(json.dumps(logs) + "\n")
         
         logger.info_rank0("Writing logs to file - done")
