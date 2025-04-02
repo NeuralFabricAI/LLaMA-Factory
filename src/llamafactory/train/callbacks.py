@@ -221,6 +221,8 @@ class LogCallback(TrainerCallback):
 
         with open(os.path.join(output_dir, TRAINER_LOG), "a", encoding="utf-8") as f:
             f.write(json.dumps(logs) + "\n")
+        
+        logger.info_rank0("Writing logs to file - done")
 
     def _create_thread_pool(self, output_dir: str) -> None:
         os.makedirs(output_dir, exist_ok=True)
