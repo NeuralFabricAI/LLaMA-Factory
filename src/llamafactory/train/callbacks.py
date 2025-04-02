@@ -322,8 +322,12 @@ class LogCallback(TrainerCallback):
 
         logger.info_rank0("self.thread_pool")
         logger.info_rank0(self.thread_pool)
-        if self.thread_pool is not None:
-            self.thread_pool.submit(self._write_log, args.output_dir, logs)
+
+        logger.info_rank0("Writing logs to directly to file - START")
+        self._write_log(args.output_dir, logs)
+        logger.info_rank0("Writing logs to directly to file - DONE")
+        # if self.thread_pool is not None:
+            # self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
     @override
     def on_prediction_step(
