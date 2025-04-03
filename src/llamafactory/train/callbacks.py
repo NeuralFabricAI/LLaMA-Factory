@@ -373,7 +373,7 @@ class S3LogCallback(TrainerCallback):
         s3_file_path = os.path.join(self.s3_path, TRAINER_LOG)
         try:
             self.s3_file = smart_open_open(s3_file_path, "w", encoding="utf-8")
-            logger.debug_rank0(f"Opened S3 log file at {s3_file_path}")
+            logger.info_rank0(f"Opened S3 log file at {s3_file_path}")
         except Exception as e:
             logger.warning_rank0(f"Failed to open S3 log file: {e}")
             self.s3_file = None
@@ -383,7 +383,7 @@ class S3LogCallback(TrainerCallback):
         if self.s3_file is not None:
             try:
                 self.s3_file.close()
-                logger.debug_rank0(f"Closed S3 log file for run {self.s3_path}")
+                logger.info_rank0(f"Closed S3 log file for run {self.s3_path}")
             except Exception as e:
                 logger.warning_rank0(f"Error closing S3 log file: {e}")
             self.s3_file = None
@@ -395,7 +395,7 @@ class S3LogCallback(TrainerCallback):
             try:
                 self.s3_file.write(json.dumps(logs) + "\n")
                 self.s3_file.flush()  # Ensure data is written immediately
-                logger.debug_rank0(f"Successfully wrote logs to S3")
+                logger.info_rank0(f"Successfully wrote logs to S3")
             except Exception as e:
                 logger.warning_rank0(f"Failed to write logs to S3: {e}")
                 # Try to reopen the file on next write
