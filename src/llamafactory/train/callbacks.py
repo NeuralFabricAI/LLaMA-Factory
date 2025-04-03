@@ -421,7 +421,7 @@ class S3LogCallback(TrainerCallback):
 
             self.s3_path = args.output_dir
             # Open the S3 file connection
-            self._open_s3_file(self.s3_path)
+            self._open_s3_file()
             logger.info_rank0(f"Training logs will be streamed to S3 path: {self.s3_path}")
 
     @override
