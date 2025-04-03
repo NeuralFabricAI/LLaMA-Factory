@@ -480,8 +480,9 @@ class S3LogCallback(TrainerCallback):
 
         logs = {k: v for k, v in logs.items() if v is not None}
 
-        if self.thread_pool is not None:
-            self.thread_pool.submit(self._write_log, logs)
+        self._write_log(logs)
+        # if self.thread_pool is not None:
+            # self.thread_pool.submit(self._write_log, logs)
 
     @override
     def on_prediction_step(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
