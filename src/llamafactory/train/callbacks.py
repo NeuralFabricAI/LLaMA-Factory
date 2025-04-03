@@ -341,6 +341,177 @@ class LogCallback(TrainerCallback):
                 self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
 
+class S3LogCallback(TrainerCallback):
+    r"""A callback for streaming training and evaluation status to S3 storage."""
+
+    def __init__(self, s3_path: str) -> None:
+        # S3 storage path (e.g., "s3://bucket-name/path/to/logs/")
+        self.s3_path = s3_path
+        # Progress
+        self.start_time = 0
+        self.cur_steps = 0
+        self.max_steps = 0
+        self.elapsed_time = ""
+        self.remaining_time = ""
+        self.thread_pool: Optional[ThreadPoolExecutor] = None
+        # Status
+        self.aborted = False
+        self.do_train = False
+        # Web UI
+        self.webui_mode = is_env_enabled("LLAMABOARD_ENABLED")
+        if self.webui_mode and not use_ray():
+            signal.signal(signal.SIGABRT, self._set_abort)
+            self.logger_handler = logging.LoggerHandler(os.environ.get("LLAMABOARD_WORKDIR"))
+            logging.add_handler(self.logger_handler)
+            transformers.logging.add_handler(self.logger_handler)
+
+    def _set_abort(self, signum, frame) -> None:
+        self.aborted = True
+
+    def _reset(self, max_steps: int = 0) -> None:
+        self.start_time = time.time()
+        self.cur_steps = 0
+        self.max_steps = max_steps
+        self.elapsed_time = ""
+        self.remaining_time = ""
+
+    def _timing(self, cur_steps: int) -> None:
+        cur_time = time.time()
+        elapsed_time = cur_time - self.start_time
+        avg_time_per_step = elapsed_time / cur_steps if cur_steps != 0 else 0
+        remaining_time = (self.max_steps - cur_steps) * avg_time_per_step
+        self.cur_steps = cur_steps
+        self.elapsed_time = str(timedelta(seconds=int(elapsed_time)))
+        self.remaining_time = str(timedelta(seconds=int(remaining_time)))
+
+    def _write_log(self, run_id: str, logs: dict[str, Any]) -> None:
+        s3_file_path = os.path.join(self.s3_path, run_id, TRAINER_LOG)
+        try:
+            with open(s3_file_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(logs) + "\n")
+            logger.debug_rank0(f"Successfully wrote logs to {s3_file_path}")
+        except Exception as e:
+            logger.warning_rank0(f"Failed to write logs to S3: {e}")
+
+    def _create_thread_pool(self) -> None:
+        self.thread_pool = ThreadPoolExecutor(max_workers=1)
+
+    def _close_thread_pool(self) -> None:
+        if self.thread_pool is not None:
+            self.thread_pool.shutdown(wait=True)
+            self.thread_pool = None
+
+    @override
+    def on_train_begin(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if args.should_save:
+            self.do_train = True
+            self._reset(max_steps=state.max_steps)
+            self._create_thread_pool()
+            # Create a unique run ID based on the output directory name and timestamp
+            self.run_id = f"{os.path.basename(args.output_dir)}_{int(time.time())}"
+            logger.info_rank0(f"Training logs will be streamed to S3 path: {os.path.join(self.s3_path, self.run_id)}")
+
+    @override
+    def on_train_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        self._close_thread_pool()
+
+    @override
+    def on_substep_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if self.aborted:
+            control.should_epoch_stop = True
+            control.should_training_stop = True
+
+    @override
+    def on_step_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if self.aborted:
+            control.should_epoch_stop = True
+            control.should_training_stop = True
+
+    @override
+    def on_evaluate(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if not self.do_train:
+            self._close_thread_pool()
+
+    @override
+    def on_predict(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if not self.do_train:
+            self._close_thread_pool()
+
+    @override
+    def on_log(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
+        if not args.should_save:
+            return
+
+        self._timing(cur_steps=state.global_step)
+        logs = dict(
+            current_steps=self.cur_steps,
+            total_steps=self.max_steps,
+            loss=state.log_history[-1].get("loss"),
+            eval_loss=state.log_history[-1].get("eval_loss"),
+            predict_loss=state.log_history[-1].get("predict_loss"),
+            reward=state.log_history[-1].get("reward"),
+            accuracy=state.log_history[-1].get("rewards/accuracies"),
+            lr=state.log_history[-1].get("learning_rate"),
+            epoch=state.log_history[-1].get("epoch"),
+            percentage=round(self.cur_steps / self.max_steps * 100, 2) if self.max_steps != 0 else 100,
+            elapsed_time=self.elapsed_time,
+            remaining_time=self.remaining_time,
+        )
+        if state.num_input_tokens_seen:
+            logs["throughput"] = round(state.num_input_tokens_seen / (time.time() - self.start_time), 2)
+            logs["total_tokens"] = state.num_input_tokens_seen
+
+        if True:
+            vram_allocated, vram_reserved = get_peak_memory()
+            logs["vram_allocated"] = round(vram_allocated / (1024**3), 2)
+            logs["vram_reserved"] = round(vram_reserved / (1024**3), 2)
+
+        logs = {k: v for k, v in logs.items() if v is not None}
+        if self.webui_mode and all(key in logs for key in ("loss", "lr", "epoch")):
+            log_str = f"'loss': {logs['loss']:.4f}, 'learning_rate': {logs['lr']:2.4e}, 'epoch': {logs['epoch']:.2f}"
+            for extra_key in ("reward", "accuracy", "throughput"):
+                if logs.get(extra_key):
+                    log_str += f", '{extra_key}': {logs[extra_key]:.2f}"
+
+            logger.info_rank0("{" + log_str + "}")
+
+        if self.thread_pool is not None:
+            self.thread_pool.submit(self._write_log, self.run_id, logs)
+
+    @override
+    def on_prediction_step(
+        self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs
+    ):
+        if self.do_train:
+            return
+
+        if self.aborted:
+            sys.exit(0)
+
+        if not args.should_save:
+            return
+
+        eval_dataloader = kwargs.pop("eval_dataloader", None)
+        if has_length(eval_dataloader):
+            if self.max_steps == 0:
+                self._reset(max_steps=len(eval_dataloader))
+                self._create_thread_pool()
+                # Create a unique run ID for evaluation
+                self.run_id = f"eval_{int(time.time())}"
+                logger.info_rank0(f"Evaluation logs will be streamed to S3 path: {os.path.join(self.s3_path, self.run_id)}")
+
+            self._timing(cur_steps=self.cur_steps + 1)
+            if self.cur_steps % 5 == 0 and self.thread_pool is not None:
+                logs = dict(
+                    current_steps=self.cur_steps,
+                    total_steps=self.max_steps,
+                    percentage=round(self.cur_steps / self.max_steps * 100, 2) if self.max_steps != 0 else 100,
+                    elapsed_time=self.elapsed_time,
+                    remaining_time=self.remaining_time,
+                )
+                self.thread_pool.submit(self._write_log, self.run_id, logs)
+
+
 class ReporterCallback(TrainerCallback):
     r"""A callback for reporting training status to external logger."""
 
