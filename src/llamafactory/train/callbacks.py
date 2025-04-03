@@ -54,9 +54,7 @@ from smart_open import open
 logger = logging.get_logger(__name__)
 
 
-def fix_valuehead_checkpoint(
-    model: "AutoModelForCausalLMWithValueHead", output_dir: str, safe_serialization: bool
-) -> None:
+def fix_valuehead_checkpoint(model: "AutoModelForCausalLMWithValueHead", output_dir: str, safe_serialization: bool) -> None:
     r"""Fix the valuehead checkpoint files.
 
     The model is already unwrapped.
@@ -87,9 +85,7 @@ def fix_valuehead_checkpoint(
         else:
             decoder_state_dict[name.replace("pretrained_model.", "", 1)] = param
 
-    model.pretrained_model.save_pretrained(
-        output_dir, state_dict=decoder_state_dict or None, safe_serialization=safe_serialization
-    )
+    model.pretrained_model.save_pretrained(output_dir, state_dict=decoder_state_dict or None, safe_serialization=safe_serialization)
 
     if safe_serialization:
         save_file(v_head_state_dict, os.path.join(output_dir, V_HEAD_SAFE_WEIGHTS_NAME), metadata={"format": "pt"})
@@ -106,9 +102,7 @@ class FixValueHeadModelCallback(TrainerCallback):
     def on_save(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
         if args.should_save:
             output_dir = os.path.join(args.output_dir, f"{PREFIX_CHECKPOINT_DIR}-{state.global_step}")
-            fix_valuehead_checkpoint(
-                model=kwargs.pop("model"), output_dir=output_dir, safe_serialization=args.save_safetensors
-            )
+            fix_valuehead_checkpoint(model=kwargs.pop("model"), output_dir=output_dir, safe_serialization=args.save_safetensors)
 
 
 class SaveProcessorCallback(TrainerCallback):
@@ -227,11 +221,7 @@ class LogCallback(TrainerCallback):
 
     @override
     def on_init_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
-        if (
-            args.should_save
-            and os.path.exists(os.path.join(args.output_dir, TRAINER_LOG))
-            and args.overwrite_output_dir
-        ):
+        if args.should_save and os.path.exists(os.path.join(args.output_dir, TRAINER_LOG)) and args.overwrite_output_dir:
             logger.warning_rank0_once("Previous trainer log in this folder will be deleted.")
             os.remove(os.path.join(args.output_dir, TRAINER_LOG))
 
@@ -308,12 +298,10 @@ class LogCallback(TrainerCallback):
 
         self._write_log(args.output_dir, logs)
         # if self.thread_pool is not None:
-            # self.thread_pool.submit(self._write_log, args.output_dir, logs)
+        # self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
     @override
-    def on_prediction_step(
-        self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs
-    ):
+    def on_prediction_step(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
         if self.do_train:
             return
 
@@ -357,6 +345,9 @@ class S3LogCallback(TrainerCallback):
         # Status
         self.aborted = False
         self.do_train = False
+        # File reference
+        self.s3_file = None
+        self.run_id = None
         # Web UI
         self.webui_mode = is_env_enabled("LLAMABOARD_ENABLED")
         if self.webui_mode and not use_ray():
@@ -384,14 +375,47 @@ class S3LogCallback(TrainerCallback):
         self.elapsed_time = str(timedelta(seconds=int(elapsed_time)))
         self.remaining_time = str(timedelta(seconds=int(remaining_time)))
 
-    def _write_log(self, run_id: str, logs: dict[str, Any]) -> None:
+    def _open_s3_file(self, run_id: str) -> None:
+        """Open a connection to the S3 log file."""
+        if self.s3_file is not None:
+            self._close_s3_file()
+
+        self.run_id = run_id
         s3_file_path = os.path.join(self.s3_path, run_id, TRAINER_LOG)
         try:
-            with open(s3_file_path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(logs) + "\n")
-            logger.debug_rank0(f"Successfully wrote logs to {s3_file_path}")
+            self.s3_file = open(s3_file_path, "w", encoding="utf-8")
+            logger.debug_rank0(f"Opened S3 log file at {s3_file_path}")
         except Exception as e:
-            logger.warning_rank0(f"Failed to write logs to S3: {e}")
+            logger.warning_rank0(f"Failed to open S3 log file: {e}")
+            self.s3_file = None
+
+    def _close_s3_file(self) -> None:
+        """Close the S3 file connection."""
+        if self.s3_file is not None:
+            try:
+                self.s3_file.close()
+                logger.debug_rank0(f"Closed S3 log file for run {self.run_id}")
+            except Exception as e:
+                logger.warning_rank0(f"Error closing S3 log file: {e}")
+            self.s3_file = None
+            self.run_id = None
+
+    def _write_log(self, run_id: str, logs: dict[str, Any]) -> None:
+        """Write logs to the S3 file."""
+        # Check if we need to open a new file (run_id changed)
+        if self.run_id != run_id:
+            self._open_s3_file(run_id)
+
+        # Write to the file if it's open
+        if self.s3_file is not None:
+            try:
+                self.s3_file.write(json.dumps(logs) + "\n")
+                self.s3_file.flush()  # Ensure data is written immediately
+                logger.debug_rank0(f"Successfully wrote logs to S3 for run {run_id}")
+            except Exception as e:
+                logger.warning_rank0(f"Failed to write logs to S3: {e}")
+                # Try to reopen the file on next write
+                self._close_s3_file()
 
     def _create_thread_pool(self) -> None:
         self.thread_pool = ThreadPoolExecutor(max_workers=1)
@@ -400,6 +424,8 @@ class S3LogCallback(TrainerCallback):
         if self.thread_pool is not None:
             self.thread_pool.shutdown(wait=True)
             self.thread_pool = None
+        # Also close S3 file when thread pool is closed
+        self._close_s3_file()
 
     @override
     def on_train_begin(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
@@ -408,8 +434,10 @@ class S3LogCallback(TrainerCallback):
             self._reset(max_steps=state.max_steps)
             self._create_thread_pool()
             # Create a unique run ID based on the output directory name and timestamp
-            self.run_id = f"{os.path.basename(args.output_dir)}_{int(time.time())}"
-            logger.info_rank0(f"Training logs will be streamed to S3 path: {os.path.join(self.s3_path, self.run_id)}")
+            run_id = f"{os.path.basename(args.output_dir)}_{int(time.time())}"
+            # Open the S3 file connection
+            self._open_s3_file(run_id)
+            logger.info_rank0(f"Training logs will be streamed to S3 path: {os.path.join(self.s3_path, run_id)}")
 
     @override
     def on_train_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
@@ -479,9 +507,7 @@ class S3LogCallback(TrainerCallback):
             self.thread_pool.submit(self._write_log, self.run_id, logs)
 
     @override
-    def on_prediction_step(
-        self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs
-    ):
+    def on_prediction_step(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
         if self.do_train:
             return
 
@@ -497,8 +523,10 @@ class S3LogCallback(TrainerCallback):
                 self._reset(max_steps=len(eval_dataloader))
                 self._create_thread_pool()
                 # Create a unique run ID for evaluation
-                self.run_id = f"eval_{int(time.time())}"
-                logger.info_rank0(f"Evaluation logs will be streamed to S3 path: {os.path.join(self.s3_path, self.run_id)}")
+                run_id = f"eval_{int(time.time())}"
+                # Open S3 file for evaluation logs
+                self._open_s3_file(run_id)
+                logger.info_rank0(f"Evaluation logs will be streamed to S3 path: {os.path.join(self.s3_path, run_id)}")
 
             self._timing(cur_steps=self.cur_steps + 1)
             if self.cur_steps % 5 == 0 and self.thread_pool is not None:
