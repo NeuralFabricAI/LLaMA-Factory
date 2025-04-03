@@ -49,7 +49,7 @@ if TYPE_CHECKING:
 
     from ..hparams import DataArguments, FinetuningArguments, GeneratingArguments, ModelArguments
 
-from smart_open import open
+from smart_open import open as smart_open_open
 
 logger = logging.get_logger(__name__)
 
@@ -207,7 +207,7 @@ class LogCallback(TrainerCallback):
         self.remaining_time = str(timedelta(seconds=int(remaining_time)))
 
     def _write_log(self, output_dir: str, logs: dict[str, Any]) -> None:
-        with open(os.path.join(output_dir, TRAINER_LOG), "wb", encoding="utf-8") as f:
+        with open(os.path.join(output_dir, TRAINER_LOG), "a", encoding="utf-8") as f:
             f.write(json.dumps(logs) + "\n")
 
     def _create_thread_pool(self, output_dir: str) -> None:
@@ -282,7 +282,7 @@ class LogCallback(TrainerCallback):
             logs["throughput"] = round(state.num_input_tokens_seen / (time.time() - self.start_time), 2)
             logs["total_tokens"] = state.num_input_tokens_seen
 
-        if True:
+        if is_env_enabled("RECORD_VRAM"):
             vram_allocated, vram_reserved = get_peak_memory()
             logs["vram_allocated"] = round(vram_allocated / (1024**3), 2)
             logs["vram_reserved"] = round(vram_reserved / (1024**3), 2)
@@ -296,9 +296,8 @@ class LogCallback(TrainerCallback):
 
             logger.info_rank0("{" + log_str + "}")
 
-        self._write_log(args.output_dir, logs)
-        # if self.thread_pool is not None:
-        # self.thread_pool.submit(self._write_log, args.output_dir, logs)
+        if self.thread_pool is not None:
+            self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
     @override
     def on_prediction_step(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
@@ -373,7 +372,7 @@ class S3LogCallback(TrainerCallback):
             self._close_s3_file()
         s3_file_path = os.path.join(self.s3_path, TRAINER_LOG)
         try:
-            self.s3_file = open(s3_file_path, "w", encoding="utf-8")
+            self.s3_file = smart_open_open(s3_file_path, "w", encoding="utf-8")
             logger.debug_rank0(f"Opened S3 log file at {s3_file_path}")
         except Exception as e:
             logger.warning_rank0(f"Failed to open S3 log file: {e}")
