@@ -332,9 +332,9 @@ class LogCallback(TrainerCallback):
 class S3LogCallback(TrainerCallback):
     r"""A callback for streaming training and evaluation status to S3 storage."""
 
-    def __init__(self, s3_path: str) -> None:
+    def __init__(self) -> None:
         # S3 storage path (e.g., "s3://bucket-name/path/to/logs/")
-        self.s3_path = s3_path
+        self.s3_path = ""
         # Progress
         self.start_time = 0
         self.cur_steps = 0
@@ -347,14 +347,6 @@ class S3LogCallback(TrainerCallback):
         self.do_train = False
         # File reference
         self.s3_file = None
-        self.run_id = None
-        # Web UI
-        self.webui_mode = is_env_enabled("LLAMABOARD_ENABLED")
-        if self.webui_mode and not use_ray():
-            signal.signal(signal.SIGABRT, self._set_abort)
-            self.logger_handler = logging.LoggerHandler(os.environ.get("LLAMABOARD_WORKDIR"))
-            logging.add_handler(self.logger_handler)
-            transformers.logging.add_handler(self.logger_handler)
 
     def _set_abort(self, signum, frame) -> None:
         self.aborted = True
@@ -375,13 +367,11 @@ class S3LogCallback(TrainerCallback):
         self.elapsed_time = str(timedelta(seconds=int(elapsed_time)))
         self.remaining_time = str(timedelta(seconds=int(remaining_time)))
 
-    def _open_s3_file(self, run_id: str) -> None:
+    def _open_s3_file(self) -> None:
         """Open a connection to the S3 log file."""
         if self.s3_file is not None:
             self._close_s3_file()
-
-        self.run_id = run_id
-        s3_file_path = os.path.join(self.s3_path, run_id, TRAINER_LOG)
+        s3_file_path = os.path.join(self.s3_path, TRAINER_LOG)
         try:
             self.s3_file = open(s3_file_path, "w", encoding="utf-8")
             logger.debug_rank0(f"Opened S3 log file at {s3_file_path}")
@@ -394,24 +384,19 @@ class S3LogCallback(TrainerCallback):
         if self.s3_file is not None:
             try:
                 self.s3_file.close()
-                logger.debug_rank0(f"Closed S3 log file for run {self.run_id}")
+                logger.debug_rank0(f"Closed S3 log file for run {self.s3_path}")
             except Exception as e:
                 logger.warning_rank0(f"Error closing S3 log file: {e}")
             self.s3_file = None
-            self.run_id = None
 
-    def _write_log(self, run_id: str, logs: dict[str, Any]) -> None:
+    def _write_log(self, logs: dict[str, Any]) -> None:
         """Write logs to the S3 file."""
-        # Check if we need to open a new file (run_id changed)
-        if self.run_id != run_id:
-            self._open_s3_file(run_id)
-
         # Write to the file if it's open
         if self.s3_file is not None:
             try:
                 self.s3_file.write(json.dumps(logs) + "\n")
                 self.s3_file.flush()  # Ensure data is written immediately
-                logger.debug_rank0(f"Successfully wrote logs to S3 for run {run_id}")
+                logger.debug_rank0(f"Successfully wrote logs to S3")
             except Exception as e:
                 logger.warning_rank0(f"Failed to write logs to S3: {e}")
                 # Try to reopen the file on next write
@@ -433,11 +418,11 @@ class S3LogCallback(TrainerCallback):
             self.do_train = True
             self._reset(max_steps=state.max_steps)
             self._create_thread_pool()
-            # Create a unique run ID based on the output directory name and timestamp
-            run_id = f"{os.path.basename(args.output_dir)}_{int(time.time())}"
+
+            self.s3_path = args.output_dir
             # Open the S3 file connection
-            self._open_s3_file(run_id)
-            logger.info_rank0(f"Training logs will be streamed to S3 path: {os.path.join(self.s3_path, run_id)}")
+            self._open_s3_file(self.s3_path)
+            logger.info_rank0(f"Training logs will be streamed to S3 path: {self.s3_path}")
 
     @override
     def on_train_end(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
@@ -495,16 +480,9 @@ class S3LogCallback(TrainerCallback):
             logs["vram_reserved"] = round(vram_reserved / (1024**3), 2)
 
         logs = {k: v for k, v in logs.items() if v is not None}
-        if self.webui_mode and all(key in logs for key in ("loss", "lr", "epoch")):
-            log_str = f"'loss': {logs['loss']:.4f}, 'learning_rate': {logs['lr']:2.4e}, 'epoch': {logs['epoch']:.2f}"
-            for extra_key in ("reward", "accuracy", "throughput"):
-                if logs.get(extra_key):
-                    log_str += f", '{extra_key}': {logs[extra_key]:.2f}"
-
-            logger.info_rank0("{" + log_str + "}")
 
         if self.thread_pool is not None:
-            self.thread_pool.submit(self._write_log, self.run_id, logs)
+            self.thread_pool.submit(self._write_log, logs)
 
     @override
     def on_prediction_step(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
@@ -523,10 +501,6 @@ class S3LogCallback(TrainerCallback):
                 self._reset(max_steps=len(eval_dataloader))
                 self._create_thread_pool()
                 # Create a unique run ID for evaluation
-                run_id = f"eval_{int(time.time())}"
-                # Open S3 file for evaluation logs
-                self._open_s3_file(run_id)
-                logger.info_rank0(f"Evaluation logs will be streamed to S3 path: {os.path.join(self.s3_path, run_id)}")
 
             self._timing(cur_steps=self.cur_steps + 1)
             if self.cur_steps % 5 == 0 and self.thread_pool is not None:
@@ -537,7 +511,7 @@ class S3LogCallback(TrainerCallback):
                     elapsed_time=self.elapsed_time,
                     remaining_time=self.remaining_time,
                 )
-                self.thread_pool.submit(self._write_log, self.run_id, logs)
+                self.thread_pool.submit(self._write_log, logs)
 
 
 class ReporterCallback(TrainerCallback):
