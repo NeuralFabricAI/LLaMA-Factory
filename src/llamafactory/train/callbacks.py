@@ -213,17 +213,8 @@ class LogCallback(TrainerCallback):
         self.remaining_time = str(timedelta(seconds=int(remaining_time)))
 
     def _write_log(self, output_dir: str, logs: dict[str, Any]) -> None:
-        logger.info_rank0("Writing logs to file")
-        logger.info_rank0(logs)
-        # writing to this file
-        logger.info_rank0("output_dir")
-        logger.info_rank0(output_dir)
-        logger.info_rank0(os.path.join(output_dir, TRAINER_LOG))
-
         with open(os.path.join(output_dir, TRAINER_LOG), "wb", encoding="utf-8") as f:
             f.write(json.dumps(logs) + "\n")
-        
-        logger.info_rank0("Writing logs to file - done")
 
     def _create_thread_pool(self, output_dir: str) -> None:
         os.makedirs(output_dir, exist_ok=True)
@@ -279,11 +270,6 @@ class LogCallback(TrainerCallback):
 
     @override
     def on_log(self, args: "TrainingArguments", state: "TrainerState", control: "TrainerControl", **kwargs):
-        logger.info_rank0("on_log function - Logging training status")
-
-        logger.info_rank0("args.should_save")
-        logger.info_rank0(args.should_save)
-
         if not args.should_save:
             return
 
@@ -320,12 +306,7 @@ class LogCallback(TrainerCallback):
 
             logger.info_rank0("{" + log_str + "}")
 
-        logger.info_rank0("self.thread_pool")
-        logger.info_rank0(self.thread_pool)
-
-        logger.info_rank0("Writing logs to directly to file - START")
         self._write_log(args.output_dir, logs)
-        logger.info_rank0("Writing logs to directly to file - DONE")
         # if self.thread_pool is not None:
             # self.thread_pool.submit(self._write_log, args.output_dir, logs)
 
