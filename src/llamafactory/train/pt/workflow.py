@@ -64,9 +64,11 @@ def run_pt(
     if training_args.do_train:
         train_result = trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
         trainer.save_model()
-        train_result.metrics["effective_tokens_per_sec"] = calculate_tps(
+        tps = calculate_tps(
             dataset_module["train_dataset"], train_result.metrics, stage="sft"
         )
+        print(f"Calculated TPS: {tps}")
+        train_result.metrics["effective_tokens_per_sec"] = tps
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()
