@@ -720,7 +720,6 @@ def get_ray_trainer(
             num_workers=ray_args.ray_num_workers,
             resources_per_worker=ray_args.resources_per_worker,
             placement_strategy=ray_args.placement_strategy,
-            use_gpu=True,
         ),
         run_config=RunConfig(
             name=ray_args.ray_run_name,
