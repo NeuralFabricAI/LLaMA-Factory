@@ -16,9 +16,12 @@
 # limitations under the License.
 
 import math
+import os
 from typing import TYPE_CHECKING, Optional
 
 from transformers import DataCollatorForLanguageModeling
+
+from ...extras.misc import calculate_tps
 
 from ...data import get_dataset, get_template_and_fix_tokenizer
 from ...extras.ploting import plot_loss
@@ -40,10 +43,21 @@ def run_pt(
     finetuning_args: "FinetuningArguments",
     callbacks: Optional[list["TrainerCallback"]] = None,
 ):
+    tokenization_callbacks = [cb for cb in callbacks if hasattr(cb, 'on_tokenization_start')]
+    tokenization_callback = tokenization_callbacks[0] if tokenization_callbacks else None
+
+
+    dataset_loading_callbacks = [cb for cb in callbacks if hasattr(cb, 'on_dataset_loading_start')]
+    dataset_loading_callback = dataset_loading_callbacks[0] if dataset_loading_callbacks else None
     tokenizer_module = load_tokenizer(model_args)
     tokenizer = tokenizer_module["tokenizer"]
     template = get_template_and_fix_tokenizer(tokenizer, data_args)
-    dataset_module = get_dataset(template, model_args, data_args, training_args, stage="pt", **tokenizer_module)
+    dataset_module = get_dataset(template, model_args, data_args, training_args, stage="pt", **tokenizer_module, tokenization_callback=tokenization_callback, dataset_loading_callback=dataset_loading_callback)
+
+    if not training_args.do_train:
+        # If not training, just bail
+        return
+
     model = load_model(tokenizer, model_args, finetuning_args, training_args.do_train)
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
@@ -62,6 +76,9 @@ def run_pt(
     if training_args.do_train:
         train_result = trainer.train(resume_from_checkpoint=training_args.resume_from_checkpoint)
         trainer.save_model()
+        train_result.metrics["effective_tokens_per_sec"] = calculate_tps(
+            dataset_module["train_dataset"], train_result.metrics, stage="sft"
+        )
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()
