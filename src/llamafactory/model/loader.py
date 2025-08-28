@@ -151,6 +151,7 @@ def load_model(
 
     # Add this to verify the config after overrides
     logger.info_rank0(f"Config after overrides: {config}")
+    print("Config after overrides:", config)
 
     patch_config(config, tokenizer, model_args, init_kwargs, is_trainable)
     apply_liger_kernel(config, model_args, is_trainable, require_logits=(finetuning_args.stage not in ["pt", "sft"]))
@@ -242,5 +243,6 @@ def load_model(
             print(f"name: {name}, dtype: {param.dtype}, device: {param.device}, trainable: {param.requires_grad}")
 
     logger.info_rank0(f"Model config actually used: {model.config}")
+    print("Model config actually used:", model.config)
 
     return model
