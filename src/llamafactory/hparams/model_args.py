@@ -405,6 +405,10 @@ class ModelArguments(
         init=False,
         metadata={"help": "Whether use block diag attention or not, derived from `neat_packing`. Do not specify it."},
     )
+    model_config: Optional[dict[str, Any]] = field(
+        default=None,
+        metadata={"help": "Custom model configuration overrides as a dictionary or JSON string."},
+    )
 
     def __post_init__(self):
         BaseModelArguments.__post_init__(self)
@@ -412,6 +416,9 @@ class ModelArguments(
         ExportArguments.__post_init__(self)
         VllmArguments.__post_init__(self)
         SGLangArguments.__post_init__(self)
+
+        if isinstance(self.model_config, str) and self.model_config.startswith("{"):
+            self.model_config = _convert_str_dict(json.loads(self.model_config))
 
     @classmethod
     def copyfrom(cls, source: "Self", **kwargs) -> "Self":

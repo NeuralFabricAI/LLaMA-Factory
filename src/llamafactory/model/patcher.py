@@ -150,6 +150,15 @@ def patch_config(
             if init_kwargs.get("device_map", None) == "auto":
                 init_kwargs["offload_folder"] = model_args.offload_folder
 
+    # Apply custom model_config overrides
+    if getattr(model_args, "model_config", None):
+        for key, value in model_args.model_config.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+                logger.info_rank0(f"Overriding config: {key} = {value}")
+            else:
+                logger.warning(f"Config key '{key}' not found in model configuration. Skipping.")
+
 
 def patch_model(
     model: "PreTrainedModel",
