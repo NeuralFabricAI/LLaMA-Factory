@@ -139,8 +139,8 @@ def load_model(
     init_kwargs = _get_init_kwargs(model_args)
     
     config = load_config(model_args)
-
     patch_config(config, tokenizer, model_args, init_kwargs, is_trainable)
+    print("Config after patch_config:", config)
     apply_liger_kernel(config, model_args, is_trainable, require_logits=(finetuning_args.stage not in ["pt", "sft"]))
 
     model = None
