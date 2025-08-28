@@ -137,6 +137,16 @@ def load_model(
 ) -> "PreTrainedModel":
     r"""Load pretrained model."""
     init_kwargs = _get_init_kwargs(model_args)
+    # Apply custom model_config overrides
+    if hasattr(model_args, "model_config"):
+        custom_config = model_args.model_config
+        for key, value in custom_config.items():
+            if hasattr(config, key):
+                setattr(config, key, value)
+                logger.info_rank0(f"Overriding config: {key} = {value}")
+            else:
+                logger.warning(f"Config key '{key}' not found in model configuration. Skipping.")
+
     config = load_config(model_args)
     patch_config(config, tokenizer, model_args, init_kwargs, is_trainable)
     apply_liger_kernel(config, model_args, is_trainable, require_logits=(finetuning_args.stage not in ["pt", "sft"]))
