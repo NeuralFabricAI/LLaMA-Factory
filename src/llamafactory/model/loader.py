@@ -160,11 +160,12 @@ def load_model(
             model = load_unsloth_pretrained_model(config, model_args, finetuning_args)
 
     if model is None and not lazy_load:
-        init_kwargs["config"] = config
-        init_kwargs["pretrained_model_name_or_path"] = model_args.model_name_or_path
+        # Remove config and pretrained_model_name_or_path from init_kwargs to avoid conflicts
+        init_kwargs.pop("config", None)
+        init_kwargs.pop("pretrained_model_name_or_path", None)
 
         if model_args.mixture_of_depths == "load":
-            model = load_mod_pretrained_model(**init_kwargs)
+            model = load_mod_pretrained_model(config=config, pretrained_model_name_or_path=model_args.model_name_or_path, **init_kwargs)
         else:
             if type(config) in AutoModelForImageTextToText._model_mapping.keys():  # image-text
                 load_class = AutoModelForImageTextToText
@@ -180,7 +181,11 @@ def load_model(
             if model_args.train_from_scratch:
                 model = load_class.from_config(config, trust_remote_code=model_args.trust_remote_code)
             else:
-                model = load_class.from_pretrained(**init_kwargs)
+                model = load_class.from_pretrained(
+                    model_args.model_name_or_path,
+                    config=config,
+                    **init_kwargs
+                )
                 if getattr(model.config, "model_type", None) == "qwen2_5_omni":
                     model = model.thinker  # use part of Omni model
 
