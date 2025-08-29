@@ -15,6 +15,7 @@
 from types import MethodType
 from typing import TYPE_CHECKING, Any
 
+from llamafactory.hparams import model_args
 import torch
 from peft import PeftModel
 from transformers import GenerationMixin, PreTrainedModel, PreTrainedTokenizerBase
@@ -96,6 +97,9 @@ def patch_config(
     init_kwargs: dict[str, Any],
     is_trainable: bool,
 ) -> None:
+    print(f"DEBUG: model_config exists: {hasattr(model_args, 'model_config')}")  
+    print(f"DEBUG: model_config value: {getattr(model_args, 'model_config', 'NOT_FOUND')}")  
+    print(f"DEBUG: model_config type: {type(getattr(model_args, 'model_config', None))}")
     if model_args.compute_dtype is None:  # priority: bf16 > fp16 > fp32
         if model_args.infer_dtype != "auto" and not is_trainable:
             model_args.compute_dtype = getattr(torch, model_args.infer_dtype)
