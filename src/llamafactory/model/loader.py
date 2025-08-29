@@ -229,7 +229,7 @@ def load_model(
         for name, param in model.named_parameters():
             print(f"name: {name}, dtype: {param.dtype}, device: {param.device}, trainable: {param.requires_grad}")
 
-    logger.info_rank0(f"Model config actually used: {model.config}")
+    logger.info(f"Model config actually used: {model.config}")
     print("Model config actually used:", model.config)
 
     return model
