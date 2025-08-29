@@ -158,6 +158,7 @@ def patch_config(
                 logger.info_rank0(f"Overriding config: {key} = {value}")
             else:
                 logger.warning(f"Config key '{key}' not found in model configuration. Skipping.")
+    print(f"model_config type: {type(model_args.model_config)}")
 
 
 def patch_model(
